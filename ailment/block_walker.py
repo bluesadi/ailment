@@ -38,6 +38,7 @@ from .expression import (
     Struct,
     Array,
     StringLiteral,
+    ComboRegister,
 )
 
 
@@ -71,6 +72,7 @@ class AILBlockWalkerBase:
             VEXCCallExpression: self._handle_VEXCCallExpression,
             Tmp: self._handle_Tmp,
             Register: self._handle_Register,
+            ComboRegister: self._handle_ComboRegister,
             Reinterpret: self._handle_Reinterpret,
             Const: self._handle_Const,
             MultiStatementExpression: self._handle_MultiStatementExpression,
@@ -217,6 +219,12 @@ class AILBlockWalkerBase:
 
     def _handle_Register(self, expr_idx: int, expr: Register, stmt_idx: int, stmt: Statement, block: Block | None):
         pass
+
+    def _handle_ComboRegister(
+        self, expr_idx: int, expr: ComboRegister, stmt_idx: int, stmt: Statement, block: Block | None
+    ):
+        for idx, reg in enumerate(expr.registers):
+            self._handle_expr(idx, reg, stmt_idx, stmt, block)
 
     def _handle_Const(self, expr_idx: int, expr: Const, stmt_idx: int, stmt: Statement, block: Block | None):
         pass
@@ -506,6 +514,12 @@ class AILBlockWalker(AILBlockWalkerBase):
                         new_args.append(arg)
                 i += 1
 
+        new_ret_expr = None
+        if stmt.ret_expr is not None:
+            new_ret_expr = self._handle_expr(-1, stmt.ret_expr, stmt_idx, stmt, block)
+            if new_ret_expr is not None and new_ret_expr is not stmt.ret_expr:
+                changed = True
+
         if changed:
             new_stmt = Call(
                 stmt.idx,
@@ -513,7 +527,7 @@ class AILBlockWalker(AILBlockWalkerBase):
                 calling_convention=stmt.calling_convention,
                 prototype=stmt.prototype,
                 args=new_args,
-                ret_expr=stmt.ret_expr,
+                ret_expr=new_ret_expr or stmt.ret_expr,
                 **stmt.tags,
             )
             if self._update_block and block is not None:
@@ -661,6 +675,27 @@ class AILBlockWalker(AILBlockWalkerBase):
     #
     # Expression handlers
     #
+
+    def _handle_ComboRegister(
+        self, expr_idx: int, expr: ComboRegister, stmt_idx: int, stmt: Statement, block: Block | None
+    ):
+        changed = False
+        new_regs = []
+
+        for idx, reg in enumerate(expr.registers):
+            new_reg = self._handle_expr(idx, reg, stmt_idx, stmt, block)
+            if new_reg and new_reg is not reg:
+                changed = True
+                new_regs.append(new_reg)
+            else:
+                new_regs.append(reg)
+
+        if changed:
+            new_expr = expr.copy()
+            expr.registers = new_regs
+            return new_expr
+
+        return None
 
     def _handle_Load(self, expr_idx: int, expr: Load, stmt_idx: int, stmt: Statement, block: Block | None):
         addr = self._handle_expr(0, expr.addr, stmt_idx, stmt, block)

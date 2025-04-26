@@ -218,22 +218,53 @@ class Register(Atom):
         return Register(self.idx, self.variable, self.reg_offset, self.bits, **self.tags)
 
 
+class ComboRegister(Atom):
+
+    def __init__(self, idx, variable, registers: list[Register | VirtualVariable], **kwargs):
+        super().__init__(idx, variable, **kwargs)
+        self.registers = registers
+        self.bits = sum(reg.bits for reg in registers)
+
+    @property
+    def size(self):
+        return self.bits // 8
+
+    def likes(self, other):
+        return (
+            type(self) is type(other)
+            and len(self.registers) == len(other.registers)
+            and all(reg.likes(other_reg) for reg, other_reg in zip(self.registers, other.registers))
+        )
+
+    def __repr__(self):
+        return str(self)
+
+    def __str__(self):
+        return "ComboRegister(" + ", ".join(str(reg) for reg in self.registers) + ")"
+
+    matches = likes
+    __hash__ = TaggedObject.__hash__
+
+    def _hash_core(self):
+        return stable_hash(("combo_reg", tuple(self.registers), self.bits, self.idx))
+
+    def copy(self) -> ComboRegister:
+        return ComboRegister(self.idx, self.variable, self.registers, **self.tags)
+
+
 class VirtualVariableCategory(IntEnum):
     REGISTER = 0
     STACK = 1
     MEMORY = 2
     PARAMETER = 3
     TMP = 4
-    UNKNOWN = 5
+    COMBO_REGISTER = 5
+    UNKNOWN = 6
 
 
 class VirtualVariable(Atom):
 
-    __slots__ = (
-        "varid",
-        "category",
-        "oident",
-    )
+    __slots__ = ("varid", "category", "oident", "reg_vvars")
 
     def __init__(
         self,
@@ -242,6 +273,7 @@ class VirtualVariable(Atom):
         bits,
         category: VirtualVariableCategory,
         oident: int | str | tuple | None = None,
+        reg_vvars=None,
         **kwargs,
     ):
         super().__init__(idx, **kwargs)
@@ -250,6 +282,7 @@ class VirtualVariable(Atom):
         self.category = category
         self.oident = oident
         self.bits = bits
+        self.reg_vvars = reg_vvars
 
     @property
     def size(self):
@@ -272,6 +305,10 @@ class VirtualVariable(Atom):
         return self.category == VirtualVariableCategory.TMP
 
     @property
+    def was_combo_reg(self):
+        return self.category == VirtualVariableCategory.COMBO_REGISTER
+
+    @property
     def reg_offset(self) -> int:
         if self.was_reg:
             assert isinstance(self.oident, int)
@@ -279,6 +316,13 @@ class VirtualVariable(Atom):
         elif self.was_parameter and self.parameter_category == VirtualVariableCategory.REGISTER:
             return self.parameter_reg_offset  # type: ignore
         raise TypeError("Is not a register")
+
+    @property
+    def reg_offsets(self) -> tuple:
+        if self.was_combo_reg:
+            assert isinstance(self.oident, tuple)
+            return self.oident
+        raise TypeError("Is not a combo register")
 
     @property
     def stack_offset(self) -> int:
@@ -341,6 +385,8 @@ class VirtualVariable(Atom):
                 ori_str = f"{{reg {self.reg_offset}}}"
             case VirtualVariableCategory.STACK:
                 ori_str = f"{{stack {self.oident}}}"
+            case VirtualVariableCategory.COMBO_REGISTER:
+                ori_str = f"{{{':'.join(str(vvar) for vvar in self.reg_vvars)}}}"
         return f"vvar_{self.varid}{ori_str}"
 
     __hash__ = TaggedObject.__hash__  # type: ignore
@@ -355,6 +401,7 @@ class VirtualVariable(Atom):
             self.bits,
             self.category,
             oident=self.oident,
+            reg_vvars=self.reg_vvars,
             variable=self.variable,
             variable_offset=self.variable_offset,
             **self.tags,
