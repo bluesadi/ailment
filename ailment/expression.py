@@ -65,6 +65,7 @@ class Expression(TaggedObject):
             r = True
             replaced = cast(Self, new_expr)
         elif not isinstance(self, Atom):
+            print(f"{self=}, {old_expr=}, {new_expr=}")
             r, replaced = self.replace(old_expr, new_expr)
         else:
             r, replaced = False, self
@@ -1736,6 +1737,14 @@ class StringLiteral(Expression):
 
     def likes(self, other):
         return type(self) is type(other) and self.data == other.data
+
+    def replace(self, old_expr: Expression, new_expr: Expression) -> tuple[bool, Self]:
+        if old_expr.likes(self):
+            r, replaced = True, new_expr
+        else:
+            r, replaced = False, self
+
+        return r, replaced
 
     matches = likes
 
