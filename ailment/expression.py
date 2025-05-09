@@ -1725,10 +1725,10 @@ class StringLiteral(Expression):
         return self._bits
 
     def __repr__(self):
-        return str(self)
+        return f'"{repr(self.data)[1:-1]}"'
 
     def __str__(self):
-        return f'"{self.data}"'
+        return f"StringLiteral({repr(self)})"
 
     __hash__ = TaggedObject.__hash__
 
